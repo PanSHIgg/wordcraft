@@ -530,6 +530,11 @@ fn auto_tag(doc: &Document, src: &Source) -> String {
     (1u32..).map(|n| format!("{base}{n}")).find(|t| !taken(t)).unwrap_or(base)
 }
 
+/// The author of a source for matching untagged entries: the editor when there is no author.
+fn by_author(x: &Source) -> &str {
+    if x.author.is_empty() { x.editor.as_str() } else { x.author.as_str() }
+}
+
 /// The stem of a new source's tag, before `1`, `2`… are added while it is taken: the first three
 /// alphanumerics of the first author's name (nothing of the author's, `Src`) and the last two
 /// digits of the year.
@@ -542,6 +547,8 @@ fn auto_tag_base(src: &Source) -> String {
     format!("{name}{year}")
 }
 
+/// Manage Sources: applies `add`, `remove` and `import` (in that order) and returns the
+/// document's sources. `import` reads a Word bibliography file (`b:Sources`, #2640).
 fn sources(s: &mut Session, v: &Value) -> CmdResult {
     if let Some(a) = v.get("add") {
         let mut src: Source = serde_json::from_value(a.clone()).map_err(|e| CmdError::Params(e.to_string()))?;
@@ -590,9 +597,6 @@ fn import_sources(s: &mut Session, path: &str) -> Result<(), CmdError> {
         let bytes = crate::io::read_file_capped(path, MAX_SOURCES_FILE, "sources file").map_err(CmdError::Failed)?;
         let file = wordcraft_docx::read_sources(&bytes).map_err(|e| CmdError::Failed(e.to_string()))?;
         let mut added = false;
-        fn by_author(x: &Source) -> &str {
-            if x.author.is_empty() { x.editor.as_str() } else { x.author.as_str() }
-        }
         // The tags and (title, author-or-editor) keys already here, once: an import of thousands
         // of untagged sources must not rescan the list per source. Tags follow `auto_tag`: the
         // stem, then 1, 2… while taken.

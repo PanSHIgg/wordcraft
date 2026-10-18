@@ -1066,6 +1066,8 @@ fn source_ui(app: &mut WordApp, ui: &mut Ui, f: &mut SourceForm) -> Next {
     if ok || cancel { Next::Close } else { Next::Stay }
 }
 
+/// The Source Manager: the document's sources with New…, Import…, Edit…, Delete and Insert
+/// Citation; each button runs the command an agent would.
 fn sources_ui(app: &mut WordApp, ui: &mut Ui, selected: &mut Option<usize>) -> Next {
     let t = Tokens::get(ui.ctx());
     let list: Vec<String> = app
