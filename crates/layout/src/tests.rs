@@ -7193,6 +7193,27 @@ fn an_overflowing_paragraph_shades_the_column_it_lands_in() {
     assert!(fills.iter().any(|r| (r.w - 120.0).abs() < 0.75), "the first piece shades the 120 pt column: {fills:?}");
 }
 
+/// Unequal columns (#2382): a paragraph's top border is drawn once, on its first piece. The piece
+/// that opens the wide column is a continuation, even though the overflow cuts a line mid-way
+/// (before, it held line 0 of the relaid layout and push_para drew the border again there, as
+/// display draws the list label again).
+#[test]
+fn an_overflowing_paragraph_draws_its_top_border_once() {
+    let d = unequal_column_doc(|p| {
+        p.borders = Some(wordcraft_doc::props::Borders { top: Some(Border::single(1.0)), ..Default::default() });
+    });
+    let l = lay(&d);
+    let horizontal: Vec<_> = l.pages[0]
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Placed::Rule { x0, y0, x1, y1, .. } if (y0 - y1).abs() < 0.01 => Some((*x0, *x1)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(horizontal.len(), 1, "one top border, on the paragraph's first piece: {horizontal:?}");
+}
+
 /// Unequal columns (#2382): a paragraph's floating object is placed once, at the paragraph's
 /// start, when its overflow opens the wide column. The wide column can hold text from before the
 /// overflow on its first line, so the resumed piece is not the paragraph's first piece and places

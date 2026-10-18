@@ -3459,8 +3459,21 @@ fn resume_relaid(relaid: &Arc<ParaLayout>, resume: usize) -> Option<(usize, Arc<
     let mut pl = (**relaid).clone();
     let xs = line.xs.get(jc - line.c0..)?.iter().map(|x| x + shift).collect();
     let leaders = line.leaders.iter().filter(|(k, _)| *k >= jc).cloned().collect();
-    pl.lines[k] = para::Line { start: resume, c0: jc, xs, leaders, left: indent, right: line.right, ..line.clone() };
-    Some((k, Arc::new(pl)))
+    let tail = para::Line { start: resume, c0: jc, xs, leaders, left: indent, right: line.right, ..line.clone() };
+    // Keep the head (the text before `resume`) as line `k` and put the tail after it: the piece
+    // placed from the tail then starts at a later line, as a continuation of the paragraph, so
+    // `push_para` no longer draws the paragraph's top border on it and display no longer draws
+    // its list label (both belong to the paragraph's first piece).
+    if let Some(head) = pl.lines.get_mut(k) {
+        head.stop = resume;
+        head.c1 = jc;
+        head.xs.truncate(jc - line.c0 + 1);
+        head.leaders.retain(|(i, _)| *i < jc);
+        head.hyphen = None;
+        head.end = para::LineEnd::Wrap;
+    }
+    pl.lines.insert(k + 1, tail);
+    Some((k + 1, Arc::new(pl)))
 }
 
 /// Run `f` with `map` as the field context's page map (`FieldCtx::page_from`), then take it back.
