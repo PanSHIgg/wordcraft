@@ -29,7 +29,7 @@ use std::sync::Arc;
 
 use wordcraft_doc::numbering::{Counters, Level};
 use wordcraft_doc::para::{Anchor, Float, FloatAlign, InlineObject, Wrap, WrapText};
-use wordcraft_doc::props::{Border, CharProps, HeightRule, Rgb, TableFloat, TextDirection};
+use wordcraft_doc::props::{Align, Border, CharProps, HeightRule, Rgb, TableFloat, TextDirection};
 use wordcraft_doc::section::{HeaderSet, SectionProps, SectionStart};
 use wordcraft_doc::{Block, Blocks, Document, Paragraph, Path, StoryRef};
 use wordcraft_geom::{Point, Rect, Spin};
@@ -1281,7 +1281,7 @@ fn layout_box(
                 // Pictures, shapes and text boxes: drawn, their areas and text boxes' text.
                 if !p.objects.is_empty() {
                     let at = ObjFrame { page: frame, col: (0.0, width), para_y: y, table_chr: table.map(|t| &t.chr), pinned: Some(&pinned) };
-                    let (back, front) = place_objects(ctx, story, &path, p, &pl, (0, pl.lines.len()), (0.0, y + lead), &at, &floats, depth);
+                    let (back, front) = place_objects(ctx, story, &path, p, &pl, (0, pl.lines.len()), (0.0, y + lead), &at, &floats, true, depth);
                     let at = behind.min(items.len());
                     behind += back.len();
                     items.splice(at..at, back);
@@ -3202,7 +3202,9 @@ struct ObjFrame<'a> {
 /// The pictures, shapes and text boxes in lines `l0..l1` of paragraph `p` (story `story`, at
 /// `path`), whose lines start at (x, y): floating ones drawn, every one's area (hit testing,
 /// selection) and text boxes' text. Floating rects come from `floats` (by object index) or are
-/// worked out from `at`. Returns what goes behind the text, and what goes in front.
+/// worked out from `at`. `first_piece` says these lines hold the paragraph's own start; a later
+/// piece, even one holding line 0 after the rest of the paragraph was laid out again for another
+/// column, places no floating objects. Returns what goes behind the text, and what goes in front.
 #[allow(clippy::too_many_arguments)]
 fn place_objects(
     ctx: &mut Ctx,
@@ -3214,6 +3216,7 @@ fn place_objects(
     (x, y): (f32, f32),
     at: &ObjFrame,
     floats: &HashMap<usize, Rect>,
+    first_piece: bool,
     depth: usize,
 ) -> (Vec<Placed>, Vec<Placed>) {
     let (mut behind, mut front) = (Vec::new(), Vec::new());
@@ -3225,7 +3228,7 @@ fn place_objects(
     // box with the title; the box stays on the cover). So the paragraph's first piece places
     // every floating object, whichever of its lines holds the anchor, and later pieces none;
     // inline objects go with their own line.
-    let first = l0 == 0;
+    let first = first_piece;
     for li in 0..pl.lines.len() {
         let in_piece = (l0..l1).contains(&li);
         if !in_piece && !first {
@@ -3412,8 +3415,9 @@ fn continued_exclusions(rel: &[para::Exclusion], excl: &[WrapArea], x0: f32, y: 
 /// The line a paragraph laid out again for another column width continues the text from `resume`
 /// on at, and the layout to place it from: the line starting exactly there, or, when the new
 /// width cuts that text mid-line, the line holding it as its tail (a natural column overflow cuts
-/// a line at the new width's break, unlike a column break, which is a break of its own). `None`
-/// when the tail cut is not supported (a bidirectional line), leaving the lines as they are.
+/// a line at the new width's break, unlike a column break, which is a break of its own). The tail
+/// is placed per the paragraph's alignment. `None` when the tail cut is not supported (a
+/// bidirectional line), leaving the lines as they are.
 fn resume_relaid(relaid: &Arc<ParaLayout>, resume: usize) -> Option<(usize, Arc<ParaLayout>)> {
     if let Some(k) = relaid.lines.iter().position(|l| l.start == resume) {
         return Some((k, relaid.clone()));
@@ -3426,8 +3430,32 @@ fn resume_relaid(relaid: &Arc<ParaLayout>, resume: usize) -> Option<(usize, Arc<
     }
     let jc = (line.c0..line.c1).find(|&k| relaid.clusters.get(k).is_some_and(|c| c.start == resume))?;
     let base = *line.xs.get(jc - line.c0)?;
-    // The tail continues on a fresh line of its own, at the paragraph's continuation indent.
-    let (indent, shift) = (relaid.rp.indent_left, relaid.rp.indent_left - base);
+    // The tail continues on a fresh line of its own, at the paragraph's continuation indent, and
+    // keeps the paragraph's alignment: an end-aligned tail sits at the line's right edge and a
+    // centred one is centred by its own width, as Word lays the rest out in the new column.
+    let indent = relaid.rp.indent_left;
+    let mut content_end = line.xs.last().copied().unwrap_or(base);
+    for k in (jc..line.c1).rev() {
+        match relaid.clusters.get(k).map(|c| c.kind) {
+            Some(para::ClKind::Space)
+            | Some(para::ClKind::Marker)
+            | Some(para::ClKind::LineBreak)
+            | Some(para::ClKind::PageBreak)
+            | Some(para::ClKind::ColumnBreak) => {
+                content_end = line.xs.get(k - line.c0).copied().unwrap_or(content_end);
+            }
+            _ => {
+                content_end -= relaid.auto_space_after(k);
+                break;
+            }
+        }
+    }
+    let start = match relaid.rp.align {
+        Align::Right => base + (line.right - content_end),
+        Align::Center => indent + ((line.right - indent) - (content_end - base)) / 2.0,
+        _ => indent,
+    };
+    let shift = start - base;
     let mut pl = (**relaid).clone();
     let xs = line.xs.get(jc - line.c0..)?.iter().map(|x| x + shift).collect();
     let leaders = line.leaders.iter().filter(|(k, _)| *k >= jc).cloned().collect();
@@ -3554,6 +3582,12 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
     // Worked out only for a last line on a page with notes.
     let mut after_on_page: Option<f32> = None;
     let mut l0 = 0;
+    // Whether the paragraph still starts at its own first line: a relay that resumes it in
+    // another column clears this, so the resumed piece is not the paragraph's first even when it
+    // holds line 0 (a wide column can hold text from before the resume on its first line, #2382)
+    // and places no floating objects again. Pieces that start at a later line are never the
+    // first (see the `l0 == 0` beside this flag where they are placed).
+    let mut first_piece = true;
     while l0 < n {
         // The lines going into a column of another width are broken again for that column
         // (#2382): a paragraph overflowing a narrow column into a wide one (or the other way)
@@ -3579,6 +3613,7 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
                 laid_width = width_now;
                 n = pl.lines.len();
                 l0 = k;
+                first_piece = false;
             }
         }
         // The lines going into a new column (or page) were broken around the wrap areas where the
@@ -3605,6 +3640,7 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
                     (pl, rel) = (relaid, here);
                     n = pl.lines.len();
                     l0 = k;
+                    first_piece = false;
                 }
             }
         }
@@ -3630,6 +3666,7 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
                     pl = relaid;
                     n = pl.lines.len();
                     l0 = k;
+                    first_piece = false;
                 }
                 None => {
                     page_map.pop();
@@ -3781,16 +3818,21 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
             pb.bottom = pb.body_floor().max(placed_bottom).min(pb.orig_bottom);
         }
         let mut items = Vec::new();
-        push_para(&mut items, StoryRef::Body, &[block as u32], &pl, l0, l1, x, y, width);
+        // The width of the column this piece is placed in: after a relay to another column it is
+        // the destination's, not the width the paragraph started in (#2382), so its shading and
+        // borders cover the column the lines are in.
+        let col_w = pb.col_w();
+        push_para(&mut items, StoryRef::Body, &[block as u32], &pl, l0, l1, x, y, col_w);
         // Pictures, shapes and text boxes in these lines (web view: floats placed by this piece).
         let at = ObjFrame {
             page: Some(PageFrame { sect: pb.sect, origin: (0.0, 0.0), number: pb.number, mirror: ctx.mirror }),
-            col: (x, width),
+            col: (x, col_w),
             para_y: if pb.web { y } else { anchor_y },
             table_chr: None,
             pinned: None,
         };
-        let (behind, front) = place_objects(ctx, StoryRef::Body, &[block as u32], p, &pl, (l0, l1), (x, y), &at, &float_rects, 0);
+        let (behind, front) =
+            place_objects(ctx, StoryRef::Body, &[block as u32], p, &pl, (l0, l1), (x, y), &at, &float_rects, first_piece && l0 == 0, 0);
         items.extend(front);
         // Line numbers in the left margin.
         if let Some(ln) = pb.sect.line_numbers.clone().filter(|_| !pb.web && pl.rp.style != "Header" && !pl.rp.suppress_line_numbers)
@@ -3932,7 +3974,7 @@ fn place_outline_para(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
         table_chr: None,
         pinned: None,
     };
-    let (behind, front) = place_objects(ctx, StoryRef::Body, &[block as u32], &q, &pl, (0, l1), (x, y), &at, &HashMap::new(), 0);
+    let (behind, front) = place_objects(ctx, StoryRef::Body, &[block as u32], &q, &pl, (0, l1), (x, y), &at, &HashMap::new(), true, 0);
     items.extend(front);
     let children = level < outline::BODY && outline::has_children(&o.levels, block);
     // Collapsed, or with something under it hidden by Show Level: the wavy line says so.

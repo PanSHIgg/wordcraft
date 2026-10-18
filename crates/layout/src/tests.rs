@@ -7130,6 +7130,97 @@ fn text_overflowing_into_an_unequal_column_takes_its_width() {
     assert_eq!(relays, 0, "no width relay for equal columns");
 }
 
+/// A long paragraph in Word 2024's "Left" preset columns (#2382): a 120 pt column, a 36 pt gap,
+/// then a 280 pt one; `edit` shapes the paragraph (alignment, shading…). The page is short so the
+/// narrow column holds two lines and the overflow resumes inside the wide column's first line
+/// (the tail cut, not a line boundary).
+fn unequal_column_doc(edit: impl Fn(&mut ParaProps)) -> Document {
+    let text = "Cras vitae aliquam leo. Integer quam ex, fringilla non ante quis, pharetra iaculis tortor. Vestibulum vel consequat augue, a dignissim massa. Vestibulum condimentum maximus urna, ac luctus quam consectetur et. Quisque convallis leo sem, id malesuada sem finibus elementum. Nam id nulla ac neque scelerisque volutpat sit amet sed ipsum. Donec hendrerit lacus ut felis porta, sed ultricies sapien tristique. Nullam eget dignissim lacus. Pellentesque habitant morbi tristique senectus et netus et malesuada fames ac turpis egestas. In quis enim eu nunc dignissim accumsan et bibendum turpis. Vivamus volutpat, libero id scelerisque commodo, nulla massa tempus velit, quis ultricies ex eros sed sapien. Proin dapibus tortor varius porttitor tincidunt. Curabitur ullamcorper magna sed lectus luctus, vel bibendum mauris semper.";
+    let mut d = Document::from_text(text);
+    d.last_section.page_h = 180.0;
+    d.last_section.columns = wordcraft_doc::section::Columns { count: 2, space: 36.0, separator: false, widths: vec![(120.0, 36.0), (280.0, 0.0)] };
+    d.format_paragraphs(&Pos::body(0, 0), &Pos::body(0, 0), &edit).unwrap();
+    d
+}
+
+/// The body lines on page 1 as (x, ink end), one entry per line.
+fn page_lines(l: &DocLayout) -> Vec<(f32, f32)> {
+    l.pages[0]
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Placed::Lines { path, para, l0, l1, x, .. } if path.0 == [0] => {
+                Some((*l0..*l1).filter_map(|li| para.lines.get(li)).map(|line| (*x, *x + ink_end(para, line))).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// Unequal columns (#2382): the tail that opens the wide column keeps the paragraph's alignment,
+/// as Word lays the rest of the paragraph out there. An end-aligned paragraph's overflow reaches
+/// the wide column's right edge; before, the tail was anchored at the left indent and its line
+/// ended short of the edge.
+#[test]
+fn an_overflowing_tail_keeps_the_paragraphs_alignment() {
+    let d = unequal_column_doc(|p| p.align = Some(Align::Right));
+    let lines = page_lines(&lay(&d));
+    let first_x = lines.first().copied().unwrap().0;
+    assert!(lines.iter().any(|(x, _)| *x > first_x + 0.5), "the paragraph overflows into the second column: {lines:?}");
+    for (x, right) in &lines {
+        let width = if (*x - first_x).abs() < 0.5 { 120.0 } else { 280.0 };
+        assert!((*right - (*x + width)).abs() < 0.75, "an end-aligned line ends at its column's right edge: {lines:?}");
+    }
+}
+
+/// Unequal columns (#2382): a shaded paragraph's overflow shades the wide column it lands in, not
+/// the width of the column it started in (borders follow the same width).
+#[test]
+fn an_overflowing_paragraph_shades_the_column_it_lands_in() {
+    let colour = wordcraft_doc::Rgb(0xDD, 0xEE, 0xFF);
+    let d = unequal_column_doc(|p| p.shading = Some(colour));
+    let l = lay(&d);
+    let fills: Vec<_> = l.pages[0]
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Placed::Fill { rect, color } if *color == colour => Some(*rect),
+            _ => None,
+        })
+        .collect();
+    assert!(fills.iter().any(|r| (r.w - 280.0).abs() < 0.75), "a piece in the 280 pt column shades it: {fills:?}");
+    assert!(fills.iter().any(|r| (r.w - 120.0).abs() < 0.75), "the first piece shades the 120 pt column: {fills:?}");
+}
+
+/// Unequal columns (#2382): a paragraph's floating object is placed once, at the paragraph's
+/// start, when its overflow opens the wide column. The wide column can hold text from before the
+/// overflow on its first line, so the resumed piece is not the paragraph's first piece and places
+/// no floating objects again.
+#[test]
+fn a_float_in_an_overflowing_paragraph_is_placed_once() {
+    let mut d = unequal_column_doc(|_| {});
+    let id = text_box(
+        &mut d,
+        40,
+        "Box",
+        72.0,
+        36.0,
+        wordcraft_doc::para::Float {
+            wrap: wordcraft_doc::para::Wrap::Square,
+            h_rel: wordcraft_doc::para::Anchor::Column,
+            v_rel: wordcraft_doc::para::Anchor::Paragraph,
+            x: 0.0,
+            y: 0.0,
+            dist: 0.0,
+            ..Default::default()
+        },
+    );
+    let l = lay(&d);
+    let placed = l.pages.iter().flat_map(|p| p.items.iter()).filter(|i| matches!(i, Placed::Object { text_box: Some(t), .. } if *t == id)).count();
+    assert_eq!(placed, 1, "the floating box is placed once");
+}
+
 /// Space before at the top of a page, measured in Word for Windows (32 cases): a paragraph that
 /// ends with a page break keeps its mark with the break (nothing of it, not even its space after,
 /// goes to the new page) and the next paragraph gets no space before there; a paragraph that starts with a page break starts on
