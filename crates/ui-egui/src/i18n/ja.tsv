@@ -2263,3 +2263,4 @@
 	{added}; {count} couldn't be read: {names}	{added}。読み込めなかったもの {count} 件: {names}
 	{names} and {n} more	{names} ほか {n} 件
 	{added}; {n} skipped (limit {max})	{added}。{n} 件をスキップしました (上限 {max})
+	Import…	インポート…

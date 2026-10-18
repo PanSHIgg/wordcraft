@@ -2659,3 +2659,4 @@ preview	Title	Örnek
 	{added}; {count} couldn't be read: {names}	{added}; {count} okunamadı: {names}
 	{names} and {n} more	{names} ve {n} tane daha
 	{added}; {n} skipped (limit {max})	{added}; {n} atlandı (sınır {max})
+	Import…	İçe aktar…

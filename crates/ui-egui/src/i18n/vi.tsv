@@ -2702,3 +2702,4 @@ template	Letter	Thư
 	{added}; {count} couldn't be read: {names}	{added}; không đọc được {count}: {names}
 	{names} and {n} more	{names} và {n} tệp nữa
 	{added}; {n} skipped (limit {max})	{added}; đã bỏ qua {n} (giới hạn {max})
+	Import…	Nhập…

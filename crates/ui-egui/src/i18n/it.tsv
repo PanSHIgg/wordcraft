@@ -2671,3 +2671,4 @@ preview	Title	Esempio
 	{added}; {count} couldn't be read: {names}	{added}; {count} non leggibili: {names}
 	{names} and {n} more	{names} e altri {n}
 	{added}; {n} skipped (limit {max})	{added}; {n} saltati (limite {max})
+	Import…	Importa…

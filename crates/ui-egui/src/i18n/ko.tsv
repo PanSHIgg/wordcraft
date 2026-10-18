@@ -2516,3 +2516,4 @@ preview	Title	제목
 	{added}; {count} couldn't be read: {names}	{added}; 읽을 수 없는 파일 {count}개: {names}
 	{names} and {n} more	{names} 외 {n}개
 	{added}; {n} skipped (limit {max})	{added}; {n}개 건너뜀 (한도 {max})
+	Import…	가져오기…

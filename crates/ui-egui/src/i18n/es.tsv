@@ -2629,3 +2629,4 @@ preview	Title	Título
 	{added}; {count} couldn't be read: {names}	{added}; no se pudieron leer {count}: {names}
 	{names} and {n} more	{names} y {n} más
 	{added}; {n} skipped (limit {max})	{added}; {n} omitidas (límite {max})
+	Import…	Importar…

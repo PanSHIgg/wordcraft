@@ -2277,3 +2277,4 @@
 	{added}; {count} couldn't be read: {names}	{added}; није могуће прочитати ({count}): {names}
 	{names} and {n} more	{names} и још {n}
 	{added}; {n} skipped (limit {max})	{added}; прескочено: {n} (ограничење {max})
+	Import…	Увези…

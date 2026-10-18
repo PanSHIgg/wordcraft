@@ -2275,3 +2275,4 @@
 	{added}; {count} couldn't be read: {names}	{added}; {count} não puderam ser lidas: {names}
 	{names} and {n} more	{names} e mais {n}
 	{added}; {n} skipped (limit {max})	{added}; {n} ignoradas (limite de {max})
+	Import…	Importar…

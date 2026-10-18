@@ -2654,3 +2654,4 @@ preview	Title	Ukázka
 	{added}; {count} couldn't be read: {names}	{added}; nelze přečíst ({count}): {names}
 	{names} and {n} more	{names} a dalších {n}
 	{added}; {n} skipped (limit {max})	{added}; přeskočeno: {n} (limit {max})
+	Import…	Importovat…

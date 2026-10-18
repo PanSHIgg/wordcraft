@@ -2264,3 +2264,4 @@
 	{added}; {count} couldn't be read: {names}	{added}；{count} 個無法讀取：{names}
 	{names} and {n} more	{names} 等另外 {n} 個
 	{added}; {n} skipped (limit {max})	{added}；已略過 {n} 個（上限 {max}）
+	Import…	匯入…

@@ -2275,3 +2275,4 @@
 	{added}; {count} couldn't be read: {names}	{added}；{count} 个无法读取：{names}
 	{names} and {n} more	{names} 等另外 {n} 个
 	{added}; {n} skipped (limit {max})	{added}；已跳过 {n} 个（上限 {max}）
+	Import…	导入…

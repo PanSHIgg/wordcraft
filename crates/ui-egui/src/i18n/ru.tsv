@@ -2660,3 +2660,4 @@ preview	Title	Пример
 	{added}; {count} couldn't be read: {names}	{added}; не удалось прочитать ({count}): {names}
 	{names} and {n} more	{names} и ещё {n}
 	{added}; {n} skipped (limit {max})	{added}; пропущено: {n} (лимит {max})
+	Import…	Импорт…
