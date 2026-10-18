@@ -21,11 +21,17 @@ pub struct Sources {
     pub style: Option<String>,
 }
 
+/// The bibliography namespace Word's own `Sources.xml` files may carry instead of OOXML's (the
+/// VBA `Source.XML` format, `schemas.microsoft.com/office/word/2004/10/bibliography`).
+const WORD_2004_BIBLIOGRAPHY: &str = "http://schemas.microsoft.com/office/word/2004/10/bibliography";
+
 /// Read a Word bibliography sources file — Word's `Sources.xml`, or any `b:Sources` document in
-/// the bibliography namespace (ECMA-376) — into [`Sources`].
+/// one of the bibliography namespaces (ECMA-376's, or Word's own 2004/10) — into [`Sources`].
 pub fn read_sources(bytes: &[u8]) -> Result<Sources, DocxError> {
-    let root = crate::xml::parse(bytes)?;
-    if root.local() != "Sources" {
+    // `parse_ns` maps Word's 2004/10 namespace onto the canonical `b` prefix as well, so both
+    // formats read; the root check then refuses an un-namespaced or unrelated `<Sources>`.
+    let root = crate::xml::parse_ns(bytes, &[("b", WORD_2004_BIBLIOGRAPHY)])?;
+    if root.name != "b:Sources" {
         return Err(DocxError::NotWord(format!("root element is {}", root.name)));
     }
     Ok(parse(&root, &mut Seen::default(), MAX_SOURCES))
@@ -255,5 +261,20 @@ mod tests {
     fn a_file_that_is_not_b_sources_is_an_error() {
         assert!(read_sources(b"<html><body>hi</body></html>").is_err());
         assert!(matches!(read_sources(b"not xml at all"), Err(DocxError::Xml(_))));
+        assert!(read_sources(b"<Sources><Source><Tag>A</Tag></Source></Sources>").is_err(), "no namespace");
+        assert!(read_sources(br#"<o:Sources xmlns:o="urn:example:other"><o:Source/></o:Sources>"#).is_err(), "an unrelated namespace");
+    }
+
+    /// Word's own 2004/10 bibliography namespace (`Sources.xml` written by scripts and older
+    /// builds, the VBA `Source.XML` format) reads as well as OOXML's.
+    #[test]
+    fn word_2004_bibliography_namespace_is_accepted() {
+        let xml = br#"<b:Sources xmlns:b="http://schemas.microsoft.com/office/word/2004/10/bibliography" StyleName="MLA">
+  <b:Source><b:Tag>Riv21</b:Tag><b:SourceType>Book</b:SourceType><b:Title>Shared Spaces</b:Title><b:Year>2021</b:Year></b:Source>
+</b:Sources>"#;
+        let f = read_sources(xml).unwrap();
+        assert_eq!(f.style.as_deref(), Some("MLA"));
+        assert_eq!(f.sources.len(), 1);
+        assert_eq!(f.sources[0].tag, "Riv21");
     }
 }
