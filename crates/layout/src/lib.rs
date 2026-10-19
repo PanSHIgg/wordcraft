@@ -3402,13 +3402,20 @@ thread_local! {
 /// around end at `t`; the column's start there (one reaching above `t` with an outline keeps its
 /// whole outline, so it may change a line before, and the paragraph is then not broken again).
 /// Areas well clear of the column (outside `-width..2 * width`, room for negative indents) can't
-/// touch its lines and are left out.
-fn continued_exclusions(rel: &[para::Exclusion], excl: &[WrapArea], x0: f32, y: f32, t: f32, width: f32) -> Vec<para::Exclusion> {
-    let before = rel.iter().filter(|e| e.top < t).map(|e| para::Exclusion { bottom: e.bottom.min(t), ..e.clone() });
+/// touch its lines and are left out. With `start`, the areas the paragraph started with, above
+/// `t`, are kept in the paragraph's first column and its own x: the wrap relay lays the lines
+/// before the resume out for the same column they are in again, while a width relay lays them out
+/// for the new column and places only the resume on, so those areas would only wrap the resumed
+/// lines around objects that are not in their column (#2382).
+fn continued_exclusions(rel: &[para::Exclusion], excl: &[WrapArea], x0: f32, y: f32, t: f32, width: f32, start: bool) -> Vec<para::Exclusion> {
     let here = rel_exclusions(excl, x0, y - t)
         .into_iter()
         .filter(|e| e.bottom > t && e.right > -width && e.left < 2.0 * width)
         .map(|e| if e.top < t && e.contour.is_none() { para::Exclusion { top: t, ..e } } else { e });
+    if !start {
+        return here.collect();
+    }
+    let before = rel.iter().filter(|e| e.top < t).map(|e| para::Exclusion { bottom: e.bottom.min(t), ..e.clone() });
     before.chain(here).collect()
 }
 
@@ -3618,10 +3625,31 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
             #[cfg(test)]
             WIDTH_RELAYS.with(|c| c.set(c.get() + 1));
             let width_now = pb.col_w();
-            let here = continued_exclusions(&rel, &pb.excl, pb.col_x(), pb.y, t, width_now);
-            let relaid =
+            // The areas of the column the text is relaid for are read as paragraph heights from
+            // the top of the line the relay resumes at. The new width usually moves that line
+            // (fewer lines come before it), so, when there are areas to place and the relaid
+            // line's top says they sit elsewhere, they are read from the top it got and the
+            // lines laid out again for them; a top that still moves keeps the lines as they are.
+            let mut offset = t;
+            let mut here = continued_exclusions(&rel, &body_wraps(ctx, pb), pb.col_x(), pb.y, offset, width_now, false);
+            let mut relaid =
                 with_page_map(ctx, &mut page_map, |ctx| again(ctx, eq_start, |ctx| ctx.para_labelled(p, width_now, None, &here, label.clone())));
-            if let Some((k, relaid)) = resume_relaid(&relaid, resume) {
+            let mut relayed = resume_relaid(&relaid, resume);
+            let moved = relayed.as_ref().and_then(|(k, r)| r.lines.get(*k)).map(|l| l.top);
+            if let Some(t1) = moved
+                && (t1 - offset).abs() > 0.01
+                && !here.is_empty()
+            {
+                offset = t1;
+                here = continued_exclusions(&rel, &body_wraps(ctx, pb), pb.col_x(), pb.y, offset, width_now, false);
+                relaid =
+                    with_page_map(ctx, &mut page_map, |ctx| again(ctx, eq_start, |ctx| ctx.para_labelled(p, width_now, None, &here, label.clone())));
+                relayed = match resume_relaid(&relaid, resume) {
+                    Some((k, r)) if r.lines.get(k).is_some_and(|l| (l.top - offset).abs() < 0.01) => Some((k, r)),
+                    _ => None,
+                };
+            }
+            if let Some((k, relaid)) = relayed {
                 (pl, rel) = (relaid, here);
                 laid_width = width_now;
                 n = pl.lines.len();
@@ -3637,7 +3665,7 @@ fn place_para_in_flow(ctx: &mut Ctx, pb: &mut PageBuilder, p: &Paragraph, block:
             && wrap_relays < MAX_WRAP_RELAYS
             && let Some((resume, t)) = pl.lines.get(l0).map(|l| (l.start, l.top))
         {
-            let here = continued_exclusions(&rel, &body_wraps(ctx, pb), pb.col_x(), pb.y, t, laid_width);
+            let here = continued_exclusions(&rel, &body_wraps(ctx, pb), pb.col_x(), pb.y, t, laid_width, true);
             if here != rel {
                 wrap_relays += 1;
                 ctx.fields.page = laid_page;

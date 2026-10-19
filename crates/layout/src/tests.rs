@@ -7240,6 +7240,61 @@ fn a_float_in_an_overflowing_paragraph_is_placed_once() {
     let l = lay(&d);
     let placed = l.pages.iter().flat_map(|p| p.items.iter()).filter(|i| matches!(i, Placed::Object { text_box: Some(t), .. } if *t == id)).count();
     assert_eq!(placed, 1, "the floating box is placed once");
+    // The box wraps the text in the narrow column it is anchored in only: every line laid out
+    // for the wide column starts at the paragraph's left edge there (before, the line after the
+    // tail kept clear of the box across the column it is not in).
+    let starts: Vec<(f32, f32)> = l.pages[0]
+        .items
+        .iter()
+        .filter_map(|it| match it {
+            Placed::Lines { story: StoryRef::Body, path, para, l0, l1, x, .. } if path.0 == [0] => {
+                Some((*l0..*l1).filter_map(|li| para.lines.get(li)).map(|ln| (*x, *x + ln.xs.first().copied().unwrap_or(0.0))).collect::<Vec<_>>())
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let first_x = starts.first().copied().unwrap().0;
+    assert!(starts.iter().any(|(x, _)| *x > first_x + 0.5), "the paragraph overflows into the wide column: {starts:?}");
+    for (x, start) in starts.iter().filter(|(x, _)| *x > first_x + 0.5) {
+        assert!((start - x).abs() < 0.5, "every line in the wide column starts at its left edge, clear of the narrow column's box: {starts:?}");
+    }
+}
+
+/// Unequal columns (#2382): the lines that run on into the wide column are broken again around
+/// that column's wrap areas, the page-anchored table in the footer (its areas come from the
+/// footer story, not from the page's floating objects) included: without, they ran through it.
+#[test]
+fn text_overflowing_into_another_column_keeps_clear_of_a_footer_table() {
+    use wordcraft_doc::para::Anchor;
+    use wordcraft_doc::props::{HeightRule, TableFloat};
+    let text: String = (0..200).map(|i| format!("word{i} ")).collect();
+    let mut d = Document::from_text(&format!("Anchor\n{}", text.trim_end()));
+    d.last_section.columns.count = 2;
+    d.last_section.columns.widths = vec![(120.0, 36.0), (280.0, 0.0)];
+    let mut table = Table::new(1, 1, 468.0);
+    table.props.float = Some(TableFloat { x: 0.0, y: 100.0, h_rel: Anchor::Page, v_rel: Anchor::Page, ..Default::default() });
+    table.rows[0].props.height = Some(40.0);
+    table.rows[0].props.height_rule = HeightRule::AtLeast;
+    table.rows[0].cells[0].blocks = vec![wordcraft_doc::para_block(wordcraft_doc::Paragraph::with_text("", Default::default()))];
+    let id = d.add_part(wordcraft_doc::PartKind::Footer, vec![std::sync::Arc::new(wordcraft_doc::Block::Table(table))]);
+    d.last_section.footers.default = Some(id);
+    let l = lay(&d);
+    let r = l.pages[0]
+        .footer
+        .iter()
+        .find_map(|it| match it {
+            Placed::Cell { table, rect, .. } if *table == Path::top(0) => Some(*rect),
+            _ => None,
+        })
+        .expect("the footer table is drawn");
+    let col2 = l.pages[0].body.x + d.last_section.column_boxes()[1].0;
+    let lines = line_boxes(&l, 0, 1, col2);
+    assert!(lines.iter().any(|(_, top, _, _)| *top > r.bottom()), "the paragraph runs past the table: {lines:?}");
+    for (left, top, right, bottom) in lines {
+        let clear = bottom <= r.y + 0.01 || top >= r.bottom() - 0.01 || left >= r.right() - 0.01 || right <= r.x + 0.01;
+        assert!(clear, "a line runs through the footer table {r:?}: {left}..{right} at {top}..{bottom}");
+    }
 }
 
 /// Space before at the top of a page, measured in Word for Windows (32 cases): a paragraph that
