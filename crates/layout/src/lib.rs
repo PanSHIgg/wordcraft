@@ -3464,7 +3464,22 @@ fn resume_relaid(relaid: &Arc<ParaLayout>, resume: usize) -> Option<(usize, Arc<
     };
     let shift = start - base;
     let mut pl = (**relaid).clone();
-    let xs = line.xs.get(jc - line.c0..)?.iter().map(|x| x + shift).collect();
+    // A justified line was stretched to the width of the column it was broken for; its tail is
+    // only the text from `resume` on, so it keeps natural word spacing, like a last line, rather
+    // than the stretched gaps of a line that then stops short of the right edge (#2382).
+    let xs: Vec<f32> = match relaid.rp.align {
+        Align::Justify | Align::Distribute => {
+            let mut out = Vec::with_capacity(line.c1 - jc + 1);
+            let mut x = indent;
+            for k in jc..line.c1 {
+                out.push(x);
+                x += relaid.clusters.get(k).map(|c| c.adv).unwrap_or(0.0);
+            }
+            out.push(x);
+            out
+        }
+        _ => line.xs.get(jc - line.c0..)?.iter().map(|x| x + shift).collect(),
+    };
     let leaders = line.leaders.iter().filter(|(k, _)| *k >= jc).cloned().collect();
     let tail = para::Line { start: resume, c0: jc, xs, leaders, left: indent, right: line.right, ..line.clone() };
     // Keep the head (the text before `resume`) as line `k` and put the tail after it: the piece

@@ -7174,6 +7174,47 @@ fn an_overflowing_tail_keeps_the_paragraphs_alignment() {
     }
 }
 
+/// Unequal columns (#2382): a justified paragraph's overflow keeps natural word spacing in the
+/// wide column: the tail is only the text from where the wide column takes over, cut from a line
+/// that was stretched to the narrow column, so it reads like a last line instead of keeping
+/// stretched gaps and stopping short of the right edge.
+#[test]
+fn a_justified_overflowing_tail_keeps_natural_spacing() {
+    let d = unequal_column_doc(|p| p.align = Some(Align::Justify));
+    let l = lay(&d);
+    let first_x = l.pages[0]
+        .items
+        .iter()
+        .find_map(|it| match it {
+            Placed::Lines { story: StoryRef::Body, path, x, .. } if path.0 == [0] => Some(*x),
+            _ => None,
+        })
+        .expect("a body line");
+    let (_, line, para) = l.pages[0]
+        .items
+        .iter()
+        .find_map(|it| match it {
+            Placed::Lines { story: StoryRef::Body, path, para, l0, x, .. } if path.0 == [0] && *x > first_x + 0.5 => {
+                Some((*x, para.lines.get(*l0)?, para))
+            }
+            _ => None,
+        })
+        .expect("the paragraph overflows into the wide column");
+    assert!((line.xs.first().copied().unwrap_or_default()).abs() < 0.5, "the tail starts at the wide column's left edge: {:?}", line.xs.first());
+    for k in line.c0..line.c1 {
+        let i = k - line.c0;
+        let gap = line.xs.get(i + 1).copied().unwrap_or_default() - line.xs.get(i).copied().unwrap_or_default();
+        let adv = para.clusters.get(k).map(|c| c.adv).unwrap_or_default();
+        assert!((gap - adv).abs() < 0.001, "cluster {k}: gap {gap} vs its advance {adv}");
+    }
+    // The paragraph is justified otherwise: its full lines fill their column.
+    let justified = page_lines(&l).iter().any(|(x, right)| {
+        let width = if (*x - first_x).abs() < 0.5 { 120.0 } else { 280.0 };
+        (*right - (*x + width)).abs() < 0.75
+    });
+    assert!(justified, "justified lines fill their column: {:?}", page_lines(&l));
+}
+
 /// Unequal columns (#2382): a shaded paragraph's overflow shades the wide column it lands in, not
 /// the width of the column it started in (borders follow the same width).
 #[test]
